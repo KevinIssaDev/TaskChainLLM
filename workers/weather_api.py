@@ -11,7 +11,8 @@ def weather_api(location: str) -> str:
         str: A string describing the weather, including temperature and weather conditions.
 
     Example Usage:
-        [[WORKER:weather_api, location="London"]]
+    
+        [[WORKER: {"name": "weather_api", "args": {"location": "Stockholm"}}]]
     """
     base_url = "https://wttr.in"
     

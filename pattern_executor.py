@@ -1,3 +1,4 @@
+import os
 import logging
 import re
 from typing import Dict, List, Tuple
@@ -8,8 +9,10 @@ from workers import get_worker, list_workers
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+API_BASE_URL = os.environ.get('OLLAMA_API_BASE_URL', 'http://localhost:11434')
+
 def list_models() -> List[str]:
-    response = requests.get('http://localhost:11434/api/tags')
+    response = requests.get(f'{API_BASE_URL}/api/tags')
     if response.status_code == 200:
         models = response.json()
         return [model['name'] for model in models['models']]
@@ -47,7 +50,7 @@ def create_system_prompt(sections: Dict[str, str], allowed_workers: List[str]) -
     available_workers = [worker for worker in list_workers() if worker in allowed_workers]
     if available_workers:
         system_prompt += f"\n\nAvailable workers: {', '.join(available_workers)}"
-        system_prompt += "\nTo use a worker, include [[WORKER:worker_name]] in your response."
+        system_prompt += "\nTo use a worker, include [[WORKER: {\"name\": \"worker_name\", \"args\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}}]] in your response."
         worker_docstrings = "\n".join([f"{worker}:\n{get_worker_docstring(worker)}" for worker in available_workers])
         system_prompt += f"\n\nWorker Details:\n{worker_docstrings}"
 
@@ -78,7 +81,7 @@ def execute_steps_and_format(input_data: str, system_prompt: str, model: str, se
 
 def generate_with_history(prompt: str, system: str, model: str, conversation_history: List[Dict[str, str]]) -> str:
     messages = [{"role": "system", "content": system}] + conversation_history + [{"role": "user", "content": prompt}]
-    response = requests.post('http://localhost:11434/api/chat',
+    response = requests.post(f'{API_BASE_URL}/api/chat',
                              json={
                                  "model": model,
                                  "messages": messages
@@ -103,37 +106,54 @@ def process_streaming_response(response) -> str:
     return full_content
 
 def process_worker_calls(output: str, allowed_workers: List[str]) -> str:
-    while "[[WORKER:" in output:
-        start = output.index("[[WORKER:")
-        end = output.index("]]", start) + 2
-        worker_call = output[start:end]
-        worker_name, args = parse_worker_call(worker_call)
-        logger.debug(f"Detected worker call: {worker_call}")
-        logger.debug(f"Worker name: {worker_name}")
-        logger.debug(f"Worker args: {args}")
+    worker_calls = list(re.finditer(r"\[\[WORKER:\s*(\{.*?\})\s*\]\]", output))
+    
+    if not worker_calls:
+        return output
 
-        worker = get_worker(worker_name)
-        if worker and worker_name in allowed_workers:
-            logger.debug(f"Executing worker: {worker_name} with args: {args}")
-            try:
-                worker_output = worker(**args)
-                logger.debug(f"Worker output: {json.dumps(worker_output)}")
-                output = output[:start] + f"[[WORKER_OUTPUT:{worker_name}, args={json.dumps(args)}]] " + json.dumps(worker_output) + " [[/WORKER_OUTPUT]]" + output[end:]
-            except Exception as e:
-                logger.error(f"Error executing worker '{worker_name}': {str(e)}")
-                error_message = f"Error executing worker '{worker_name}': {str(e)}"
-                output = output[:start] + f"[[WORKER_ERROR:{worker_name}]] {error_message} [[/WORKER_ERROR]]" + output[end:]
-        else:
-            logger.error(f"Error: Worker '{worker_name}' not found or not allowed")
-            error_message = f"Worker '{worker_name}' not found or not allowed"
-            output = output[:start] + f"[[WORKER_ERROR:{worker_name}]] {error_message} [[/WORKER_ERROR]]" + output[end:]
+    replacements = []
+    for match in worker_calls:
+        worker_call = match.group(1)
+        try:
+            worker_data = json.loads(worker_call)
+            worker_name = worker_data.get('name')
+            args = worker_data.get('args', {})
+            
+            logger.debug(f"Detected worker call: {worker_call}")
+            logger.debug(f"Worker name: {worker_name}")
+            logger.debug(f"Worker args: {args}")
+
+            worker = get_worker(worker_name)
+            if worker and worker_name in allowed_workers:
+                logger.debug(f"Executing worker: {worker_name} with args: {args}")
+                try:
+                    worker_output = worker(**args) if args else worker()
+                    logger.debug(f"Worker output: {json.dumps(worker_output)}")
+                    replacement = f"[[WORKER_OUTPUT:{worker_name}, args={json.dumps(args)}]] {json.dumps(worker_output)} [[/WORKER_OUTPUT]]"
+                except Exception as e:
+                    logger.error(f"Error executing worker '{worker_name}': {str(e)}")
+                    error_message = f"Error executing worker '{worker_name}': {str(e)}"
+                    replacement = f"[[WORKER_ERROR:{worker_name}]] {error_message} [[/WORKER_ERROR]]"
+            else:
+                logger.error(f"Error: Worker '{worker_name}' not found or not allowed")
+                error_message = f"Worker '{worker_name}' not found or not allowed"
+                replacement = f"[[WORKER_ERROR:{worker_name}]] {error_message} [[/WORKER_ERROR]]"
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing worker call JSON: {str(e)}")
+            error_message = f"Invalid worker call format: {str(e)}"
+            replacement = f"[[WORKER_ERROR:JSON_PARSE]] {error_message} [[/WORKER_ERROR]]"
         
-        logger.debug(f"Updated output after worker replacement: {output}")
+        replacements.append((match.start(), match.end(), replacement))
+    
+    for start, end, replacement in reversed(replacements):
+        output = output[:start] + replacement + output[end:]
+    
+    logger.debug(f"Updated output after all worker replacements: {output}")
     return output
 
 def refine_output(output: str, sections: Dict[str, str], model: str, conversation_history: List[Dict[str, str]]) -> str:
     messages = [{"role": "system", "content": sections['OUTPUT INSTRUCTIONS']}] + conversation_history + [{"role": "user", "content": output}]
-    response = requests.post('http://localhost:11434/api/chat',
+    response = requests.post(f'{API_BASE_URL}/api/chat',
                              json={
                                  "model": model,
                                  "messages": messages
@@ -149,15 +169,6 @@ def get_worker_docstring(worker_name: str) -> str:
     if worker:
         return worker.__doc__
     return f"No docstring available for worker '{worker_name}'."
-
-def parse_worker_call(worker_call: str) -> Tuple[str, dict]:
-    match = re.match(r"\[\[WORKER:(\w+),\s*(.*)\]\]", worker_call)
-    if match:
-        worker_name = match.group(1)
-        args_str = match.group(2)
-        args = dict(re.findall(r'(\w+)="([^"]+)"', args_str))
-        return worker_name, args
-    return "", {}
 
 def pipe_patterns(pattern_paths: List[str], initial_input: str, model: str, allowed_workers: List[str]) -> str:
     current_output = initial_input

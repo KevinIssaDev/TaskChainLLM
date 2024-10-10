@@ -15,7 +15,7 @@ def cve_lookup(cve_list: str) -> List[Dict]:
         List[Dict]: A list of dictionaries containing information for the specified CVEs.
 
     Example Usage:
-        [[WORKER:cve_lookup, cve_list="CVE-2024-43573,CVE-2023-12345"]]
+        [[WORKER: {"name": "cve_lookup", "args": {"cve_list": "CVE-2024-43573,CVE-2023-12345"}}]]
     """
     url = "https://www.cisa.gov/sites/default/files/csv/known_exploited_vulnerabilities.csv"
 
