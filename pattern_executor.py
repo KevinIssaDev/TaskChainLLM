@@ -42,7 +42,7 @@ def execute_pattern(pattern_path: str, input_data: str, model: str, allowed_work
     logger.debug(f"Available workers: {available_workers}")
 
     output = execute_steps_and_format(
-        input_data, system_prompt, model, sections)
+        input_data, system_prompt, model, sections, allowed_workers)
 
     return output
 
@@ -59,7 +59,7 @@ def extract_sections_from_markdown(markdown_content: str) -> Dict[str, str]:
     return sections
 
 
-def execute_steps_and_format(input_data: str, system_prompt: str, model: str, sections: Dict[str, str]) -> str:
+def execute_steps_and_format(input_data: str, system_prompt: str, model: str, sections: Dict[str, str], allowed_workers: List[str]) -> str:
     logger.debug(f"Initial system prompt:\n{system_prompt}\n")
     logger.debug(f"Input data:\n{input_data}\n")
 
@@ -92,39 +92,40 @@ def execute_steps_and_format(input_data: str, system_prompt: str, model: str, se
     conversation_history.append({"role": "assistant", "content": output})
     logger.debug(f"Initial output: {output}")
 
-    while "[[WORKER:" in output:
-        start = output.index("[[WORKER:")
-        end = output.index("]]", start) + 2
-        worker_call = output[start:end]
-        worker_name, args = parse_worker_call(worker_call)
-        logger.debug(f"Detected worker call: {worker_call}")
-        logger.debug(f"Worker name: {worker_name}")
-        logger.debug(f"Worker args: {args}")
+    if allowed_workers:
+        while "[[WORKER:" in output:
+            start = output.index("[[WORKER:")
+            end = output.index("]]", start) + 2
+            worker_call = output[start:end]
+            worker_name, args = parse_worker_call(worker_call)
+            logger.debug(f"Detected worker call: {worker_call}")
+            logger.debug(f"Worker name: {worker_name}")
+            logger.debug(f"Worker args: {args}")
 
-        worker = get_worker(worker_name)
-        if worker:
-            logger.debug(f"Executing worker: {worker_name} with args: {args}")
-            worker_output = worker(**args)
-            logger.debug(f"Worker output: {json.dumps(worker_output)}")
+            worker = get_worker(worker_name)
+            if worker:
+                logger.debug(f"Executing worker: {worker_name} with args: {args}")
+                worker_output = worker(**args)
+                logger.debug(f"Worker output: {json.dumps(worker_output)}")
 
-            # Replace the worker call with its output
-            output = output[:start] + f"[[WORKER_OUTPUT:{worker_name}, args={json.dumps(args)}]] " + json.dumps(worker_output) + " [[/WORKER_OUTPUT]]" + output[end:]
-            logger.debug(f"Updated output after worker replacement: {output}")
-        else:
-            logger.error(f"Error: Worker '{worker_name}' not found")
-            output = output.replace(worker_call, f"Error: Worker '{worker_name}' not found")
+                # Replace the worker call with its output
+                output = output[:start] + f"[[WORKER_OUTPUT:{worker_name}, args={json.dumps(args)}]] " + json.dumps(worker_output) + " [[/WORKER_OUTPUT]]" + output[end:]
+                logger.debug(f"Updated output after worker replacement: {output}")
+            else:
+                logger.error(f"Error: Worker '{worker_name}' not found")
+                output = output.replace(worker_call, f"Error: Worker '{worker_name}' not found")
 
-    # Remove worker information from system prompt
-    clean_system_prompt = remove_worker_info(system_prompt)
+        # Remove worker information from system prompt
+        clean_system_prompt = remove_worker_info(system_prompt)
     
-    # After all worker calls have been replaced, send the updated output back to the LLM
-    updated_prompt = f"Process the following data and continue the task:\n\nDATA:\n{output}"
-    final_output = generate_with_history(updated_prompt, clean_system_prompt)
-    conversation_history.append({"role": "assistant", "content": final_output})
-    logger.debug(f"Final output: {final_output}")
+        # After all worker calls have been replaced, send the updated output back to the LLM
+        enriched_prompt = f"Process the following data and continue the task:\n\nDATA:\n{output}"
+        output = generate_with_history(enriched_prompt, clean_system_prompt)
+        conversation_history.append({"role": "assistant", "content": output})
+        logger.debug(f"Final output: {output}")
 
     # Always refine the output before returning
-    refined_output = refine_output(final_output, sections, model, conversation_history)
+    refined_output = refine_output(output, sections, model, conversation_history)
     logger.debug("Refined output:")
     logger.debug(refined_output)
 
