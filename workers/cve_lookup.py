@@ -2,6 +2,7 @@ import pandas as pd
 import requests
 from io import StringIO
 from typing import List, Dict
+import json
 
 
 def cve_lookup(cve_list: str) -> List[Dict]:
@@ -28,7 +29,7 @@ def cve_lookup(cve_list: str) -> List[Dict]:
         cve_ids = [cve.strip() for cve in cve_list.split(',')]
 
         result_df = df[df['cveID'].isin(cve_ids)]
-        json_result = result_df.to_json(orient='records')
+        json_result = json.loads(result_df.to_json(orient='records'))
 
         return json_result
     else:

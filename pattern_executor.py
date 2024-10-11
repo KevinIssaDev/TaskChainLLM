@@ -60,24 +60,36 @@ def execute_steps_and_format(input_data: str, system_prompt: str, model: str, se
     logger.debug(f"Initial system prompt:\n{system_prompt}\n")
     logger.debug(f"Input data:\n{input_data}\n")
 
-    conversation_history = []
+    conversation_history = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": input_data}
+    ]
     output = generate_with_history(input_data, system_prompt, model, conversation_history)
     conversation_history.append({"role": "assistant", "content": output})
     logger.debug(f"Initial output: {output}")
 
     if allowed_workers:
-        output = process_worker_calls(output, allowed_workers)
+        worker_responses = process_worker_calls(output, allowed_workers)
         clean_system_prompt = remove_worker_info(system_prompt)
-        enriched_prompt = f"Process the following data and continue the task:\n\nDATA:\n{output}"
+        enriched_prompt = f"Here are the worker responses to your previous requests:\n{worker_responses}\nPlease incorporate this information into your workflow and provide an updated response."
+        logger.debug(f"Enriched prompt: {enriched_prompt}")
+        conversation_history.append({"role": "user", "content": enriched_prompt})
         output = generate_with_history(enriched_prompt, clean_system_prompt, model, conversation_history)
         conversation_history.append({"role": "assistant", "content": output})
-        logger.debug(f"Final output: {output}")
+        logger.debug(f"Updated output with worker information: {output}")
 
-    refined_output = refine_output(output, sections, model, conversation_history)
-    logger.debug("Refined output:")
-    logger.debug(refined_output)
-
-    return refined_output
+    if "OUTPUT INSTRUCTIONS" in sections:
+        refinement_prompt = sections['OUTPUT INSTRUCTIONS']
+        conversation_history.append({"role": "user", "content": refinement_prompt})
+        output = generate_with_history(refinement_prompt, clean_system_prompt, model, conversation_history)
+        conversation_history.append({"role": "assistant", "content": output})
+        logger.debug("Refined output:")
+        logger.debug(output)
+    else:
+        logger.debug("No output refinement instructions found.")
+    logger.debug("Full conversation history:")
+    logger.debug(json.dumps(conversation_history, indent=2))
+    return output
 
 def generate_with_history(prompt: str, system: str, model: str, conversation_history: List[Dict[str, str]]) -> str:
     messages = [{"role": "system", "content": system}] + conversation_history + [{"role": "user", "content": prompt}]
@@ -111,7 +123,7 @@ def process_worker_calls(output: str, allowed_workers: List[str]) -> str:
     if not worker_calls:
         return output
 
-    replacements = []
+    worker_responses = []
     for match in worker_calls:
         worker_call = match.group(1)
         try:
@@ -129,40 +141,41 @@ def process_worker_calls(output: str, allowed_workers: List[str]) -> str:
                 try:
                     worker_output = worker(**args) if args else worker()
                     logger.debug(f"Worker output: {json.dumps(worker_output)}")
-                    replacement = f"[[WORKER_OUTPUT:{worker_name}, args={json.dumps(args)}]] {json.dumps(worker_output)} [[/WORKER_OUTPUT]]"
+                    reply = (
+                        f"[[WORKER_RESPONSE]]\n"
+                        f"Worker: {worker_name}\n"
+                        f"Arguments: {json.dumps(args)}\n"
+                        f"Output: {json.dumps(worker_output)}\n"
+                        f"[[/WORKER_RESPONSE]]"
+                    )
                 except Exception as e:
                     logger.error(f"Error executing worker '{worker_name}': {str(e)}")
                     error_message = f"Error executing worker '{worker_name}': {str(e)}"
-                    replacement = f"[[WORKER_ERROR:{worker_name}]] {error_message} [[/WORKER_ERROR]]"
+                    reply = (
+                        f"[[WORKER_ERROR]]\n"
+                        f"Worker: {worker_name}\n"
+                        f"Error: {error_message}\n"
+                        f"[[/WORKER_ERROR]]"
+                    )
             else:
                 logger.error(f"Error: Worker '{worker_name}' not found or not allowed")
                 error_message = f"Worker '{worker_name}' not found or not allowed"
-                replacement = f"[[WORKER_ERROR:{worker_name}]] {error_message} [[/WORKER_ERROR]]"
+                reply = (
+                    f"[[WORKER_ERROR]]\n"
+                    f"Worker: {worker_name}\n"
+                    f"Error: {error_message}\n"
+                    f"[[/WORKER_ERROR]]"
+                )
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing worker call JSON: {str(e)}")
             error_message = f"Invalid worker call format: {str(e)}"
-            replacement = f"[[WORKER_ERROR:JSON_PARSE]] {error_message} [[/WORKER_ERROR]]"
-        
-        replacements.append((match.start(), match.end(), replacement))
-    
-    for start, end, replacement in reversed(replacements):
-        output = output[:start] + replacement + output[end:]
-    
-    logger.debug(f"Updated output after all worker replacements: {output}")
-    return output
-
-def refine_output(output: str, sections: Dict[str, str], model: str, conversation_history: List[Dict[str, str]]) -> str:
-    messages = [{"role": "system", "content": sections['OUTPUT INSTRUCTIONS']}] + conversation_history + [{"role": "user", "content": output}]
-    response = requests.post(f'{API_BASE_URL}/api/chat',
-                             json={
-                                 "model": model,
-                                 "messages": messages
-                             },
-                             stream=True)
-    if response.status_code == 200:
-        return process_streaming_response(response)
-    else:
-        raise Exception(f"Error in refine output API call: {response.text}")
+            reply = (
+                f"[[WORKER_ERROR]]\n"
+                f"Error: {error_message}\n"
+                f"[[/WORKER_ERROR]]"
+            )
+        worker_responses.append(reply)
+    return worker_responses
 
 def get_worker_docstring(worker_name: str) -> str:
     worker = get_worker(worker_name)
