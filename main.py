@@ -10,7 +10,7 @@ def main():
     parser.add_argument("--input", help="Input data for the pattern or path to a file containing input data")
     parser.add_argument("--model", default="qwen2.5:7b", help="Model to use for execution")
     parser.add_argument("--list-models", action="store_true", help="List available models")
-    parser.add_argument("--allowed-workers", nargs='+', help="List of allowed workers to use")
+    parser.add_argument("--workers", nargs='+', help="Workers to allow")
     parser.add_argument("--list-workers", action="store_true", help="List all available workers and their docstrings")
     args = parser.parse_args()
 
