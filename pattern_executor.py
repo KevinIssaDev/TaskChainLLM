@@ -5,8 +5,10 @@ from typing import Dict, List, Tuple
 import requests
 import json
 from workers import get_worker, list_workers
+import traceback
 
-logging.basicConfig(level=logging.DEBUG)
+# set to logging.DEBUG for more verbose logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = os.environ.get('OLLAMA_API_BASE_URL', 'http://localhost:11434')
@@ -70,18 +72,18 @@ def execute_steps_and_format(input_data: str, system_prompt: str, model: str, se
 
     if allowed_workers:
         worker_responses = process_worker_calls(output, allowed_workers)
-        clean_system_prompt = remove_worker_info(system_prompt)
+        system_prompt = remove_worker_info(system_prompt)
         enriched_prompt = f"Here are the worker responses to your previous requests:\n{worker_responses}\nPlease incorporate this information into your workflow and provide an updated response."
         logger.debug(f"Enriched prompt: {enriched_prompt}")
         conversation_history.append({"role": "user", "content": enriched_prompt})
-        output = generate_with_history(enriched_prompt, clean_system_prompt, model, conversation_history)
+        output = generate_with_history(enriched_prompt, system_prompt, model, conversation_history)
         conversation_history.append({"role": "assistant", "content": output})
         logger.debug(f"Updated output with worker information: {output}")
 
     if "OUTPUT INSTRUCTIONS" in sections:
         refinement_prompt = sections['OUTPUT INSTRUCTIONS']
         conversation_history.append({"role": "user", "content": refinement_prompt})
-        output = generate_with_history(refinement_prompt, clean_system_prompt, model, conversation_history)
+        output = generate_with_history(refinement_prompt, system_prompt, model, conversation_history)
         conversation_history.append({"role": "assistant", "content": output})
         logger.debug("Refined output:")
         logger.debug(output)
@@ -126,6 +128,7 @@ def process_worker_calls(output: str, allowed_workers: List[str]) -> str:
     worker_responses = []
     for match in worker_calls:
         worker_call = match.group(1)
+        logger.debug(f"Attempting to parse worker call JSON: {worker_call}")
         try:
             worker_data = json.loads(worker_call)
             worker_name = worker_data.get('name')
@@ -150,11 +153,13 @@ def process_worker_calls(output: str, allowed_workers: List[str]) -> str:
                     )
                 except Exception as e:
                     logger.error(f"Error executing worker '{worker_name}': {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     error_message = f"Error executing worker '{worker_name}': {str(e)}"
                     reply = (
                         f"[[WORKER_ERROR]]\n"
                         f"Worker: {worker_name}\n"
                         f"Error: {error_message}\n"
+                        f"Traceback: {traceback.format_exc()}\n"
                         f"[[/WORKER_ERROR]]"
                     )
             else:
@@ -168,10 +173,14 @@ def process_worker_calls(output: str, allowed_workers: List[str]) -> str:
                 )
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing worker call JSON: {str(e)}")
+            logger.error(f"Problematic worker call: {worker_call}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             error_message = f"Invalid worker call format: {str(e)}"
             reply = (
                 f"[[WORKER_ERROR]]\n"
                 f"Error: {error_message}\n"
+                f"Problematic worker call: {worker_call}\n"
+                f"Traceback: {traceback.format_exc()}\n"
                 f"[[/WORKER_ERROR]]"
             )
         worker_responses.append(reply)

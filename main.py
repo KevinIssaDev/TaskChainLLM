@@ -1,40 +1,8 @@
 import argparse
-from fastapi import FastAPI, HTTPException
 from pattern_executor import execute_pattern, pipe_patterns, list_models
-from workers import call_worker, list_workers, get_worker
-from typing import List, Optional
-import re
+from workers import list_workers, get_worker
 import os
 
-app = FastAPI()
-
-@app.post("/execute_pattern")
-async def api_execute_pattern(pattern_path: str, input_data: str, model: str = "qwen2.5:7b", allowed_workers: Optional[List[str]] = None):
-    try:
-        if allowed_workers is None:
-            allowed_workers = list_workers()  # Default to all workers if not specified
-        result = execute_pattern(pattern_path, input_data, model, allowed_workers)
-        return {"result": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/pipe_patterns")
-async def api_pipe_patterns(pattern_paths: List[str], input_data: str, model: str = "qwen2.5:7b", allowed_workers: Optional[List[str]] = None):
-    try:
-        if allowed_workers is None:
-            allowed_workers = list_workers()  # Default to all workers if not specified
-        result = pipe_patterns(pattern_paths, input_data, model, allowed_workers)
-        return {"result": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/list_workers")
-async def api_list_workers():
-    return {"workers": list_workers()}
-
-@app.get("/list_models")
-async def api_list_models():
-    return {"models": list_models()}
 
 def main():
     parser = argparse.ArgumentParser(description="Execute a pattern or pipe multiple patterns.")
