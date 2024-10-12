@@ -41,7 +41,7 @@ def main():
             input_data = file.read()
 
     # Use all workers if not specified
-    allowed_workers = args.allowed_workers if args.allowed_workers else [] #list_workers(), if we want to default to all workers, else []
+    allowed_workers = args.workers if args.workers else [] #list_workers(), if we want to default to all workers, else []
 
     try:
         if len(args.pattern_paths) == 1:
