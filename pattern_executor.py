@@ -8,7 +8,7 @@ from workers import get_worker, list_workers
 import traceback
 
 # set to logging.DEBUG for more verbose logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = os.environ.get('OLLAMA_API_BASE_URL', 'http://localhost:11434')
@@ -72,13 +72,16 @@ def execute_steps_and_format(input_data: str, system_prompt: str, model: str, se
 
     if allowed_workers:
         worker_responses = process_worker_calls(output, allowed_workers)
-        system_prompt = remove_worker_info(system_prompt)
-        enriched_prompt = f"Here are the worker responses to your previous requests:\n{worker_responses}\nPlease incorporate this information into your workflow and provide an updated response."
-        logger.debug(f"Enriched prompt: {enriched_prompt}")
-        conversation_history.append({"role": "user", "content": enriched_prompt})
-        output = generate_with_history(enriched_prompt, system_prompt, model, conversation_history)
-        conversation_history.append({"role": "assistant", "content": output})
-        logger.debug(f"Updated output with worker information: {output}")
+        if worker_responses:  # Only process if there are worker responses
+            system_prompt = remove_worker_info(system_prompt)
+            enriched_prompt = f"Here are the worker responses to your previous requests:\n{worker_responses}\nPlease incorporate this information into your workflow and provide an updated response."
+            logger.debug(f"Enriched prompt: {enriched_prompt}")
+            conversation_history.append({"role": "user", "content": enriched_prompt})
+            output = generate_with_history(enriched_prompt, system_prompt, model, conversation_history)
+            conversation_history.append({"role": "assistant", "content": output})
+            logger.debug(f"Updated output with worker information: {output}")
+        else:
+            logger.debug("No worker responses to process")
 
     if "OUTPUT INSTRUCTIONS" in sections:
         refinement_prompt = sections['OUTPUT INSTRUCTIONS']
@@ -91,6 +94,7 @@ def execute_steps_and_format(input_data: str, system_prompt: str, model: str, se
         logger.debug("No output refinement instructions found.")
     logger.debug("Full conversation history:")
     logger.debug(json.dumps(conversation_history, indent=2))
+    logger.debug(f"Final output:\n{output}")
     return output
 
 def generate_with_history(prompt: str, system: str, model: str, conversation_history: List[Dict[str, str]]) -> str:
@@ -122,24 +126,30 @@ def process_streaming_response(response) -> str:
 def process_worker_calls(output: str, allowed_workers: List[str]) -> str:
     worker_calls = list(re.finditer(r"\[\[WORKER:\s*(\{.*?\})\s*\]\]", output))
     
+    logger.debug(f"Found {len(worker_calls)} worker call(s) in the output")
+    
     if not worker_calls:
-        return output
+        logger.debug("No worker calls found in the output")
+        return ""
 
     worker_responses = []
     for match in worker_calls:
         worker_call = match.group(1)
-        logger.debug(f"Attempting to parse worker call JSON: {worker_call}")
+        logger.debug(f"Processing worker call: {worker_call}")
         try:
-            worker_data = json.loads(worker_call)
+            # Use a custom JSON decoder to handle the nested quotes
+            worker_data = json.loads(worker_call, strict=False)
             worker_name = worker_data.get('name')
             args = worker_data.get('args', {})
             
-            logger.debug(f"Detected worker call: {worker_call}")
-            logger.debug(f"Worker name: {worker_name}")
-            logger.debug(f"Worker args: {args}")
+            logger.debug(f"Parsed worker call - Name: {worker_name}, Args: {args}")
+
+            if worker_name not in allowed_workers:
+                logger.warning(f"Worker '{worker_name}' is not in the list of allowed workers")
+                continue
 
             worker = get_worker(worker_name)
-            if worker and worker_name in allowed_workers:
+            if worker:
                 logger.debug(f"Executing worker: {worker_name} with args: {args}")
                 try:
                     worker_output = worker(**args) if args else worker()
@@ -151,6 +161,7 @@ def process_worker_calls(output: str, allowed_workers: List[str]) -> str:
                         f"Output: {json.dumps(worker_output)}\n"
                         f"[[/WORKER_RESPONSE]]"
                     )
+                    worker_responses.append(reply)
                 except Exception as e:
                     logger.error(f"Error executing worker '{worker_name}': {str(e)}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
@@ -162,29 +173,16 @@ def process_worker_calls(output: str, allowed_workers: List[str]) -> str:
                         f"Traceback: {traceback.format_exc()}\n"
                         f"[[/WORKER_ERROR]]"
                     )
+                    worker_responses.append(reply)
             else:
-                logger.error(f"Error: Worker '{worker_name}' not found or not allowed")
-                error_message = f"Worker '{worker_name}' not found or not allowed"
-                reply = (
-                    f"[[WORKER_ERROR]]\n"
-                    f"Worker: {worker_name}\n"
-                    f"Error: {error_message}\n"
-                    f"[[/WORKER_ERROR]]"
-                )
+                logger.error(f"Worker '{worker_name}' not found")
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing worker call JSON: {str(e)}")
             logger.error(f"Problematic worker call: {worker_call}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-            error_message = f"Invalid worker call format: {str(e)}"
-            reply = (
-                f"[[WORKER_ERROR]]\n"
-                f"Error: {error_message}\n"
-                f"Problematic worker call: {worker_call}\n"
-                f"Traceback: {traceback.format_exc()}\n"
-                f"[[/WORKER_ERROR]]"
-            )
-        worker_responses.append(reply)
-    return worker_responses
+    
+    logger.debug(f"Processed {len(worker_responses)} worker response(s)")
+    return "\n".join(worker_responses)
 
 def get_worker_docstring(worker_name: str) -> str:
     worker = get_worker(worker_name)
