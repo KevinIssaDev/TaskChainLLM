@@ -8,7 +8,7 @@ from workers import get_worker, list_workers
 import traceback
 
 # set to logging.DEBUG for more verbose logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = os.environ.get('OLLAMA_API_BASE_URL', 'http://localhost:11434')
@@ -94,7 +94,6 @@ def execute_steps_and_format(input_data: str, system_prompt: str, model: str, se
         logger.debug("No output refinement instructions found.")
     logger.debug("Full conversation history:")
     logger.debug(json.dumps(conversation_history, indent=2))
-    logger.debug(f"Final output:\n{output}")
     return output
 
 def generate_with_history(prompt: str, system: str, model: str, conversation_history: List[Dict[str, str]]) -> str:
