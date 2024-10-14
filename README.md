@@ -75,7 +75,7 @@ def time_of_day() -> str:
     Example Usage:
         [[WORKER: {"name": "time_of_day"}]]
     """
-    response = requests.get('http://example.com/api/time')
+    response = requests.get('http://example.com/api/time') # PLACEHOLDER
     data = response.json()
     return data['time']
 
@@ -83,3 +83,7 @@ worker = time_of_day
 ```
 
 See `\patterns` and `\workers` for more examples.
+
+## Contributing
+
+Contributions to TaskChainLLM are welcome! Please feel free to submit pull requests, report bugs, or suggest new features.
