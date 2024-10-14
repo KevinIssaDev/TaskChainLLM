@@ -38,7 +38,7 @@ TaskChainLLM is a flexible, modular system that combines Large Language Models (
 
 3. **Run the Tool**:
    ```bash
-   python main.py --pattern patterns/pattern1.md patterns/pattern2.md --input "Your input data" --workers worker1 worker2
+   python main.py --pattern pattern1.md pattern2.md --input "Your input data" --workers worker1 worker2
    ```
 
 
