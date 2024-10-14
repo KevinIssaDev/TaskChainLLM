@@ -6,12 +6,11 @@ import requests
 import json
 from workers import get_worker, list_workers
 import traceback
+from config import API_BASE_URL, LOG_LEVEL
 
 # set to logging.DEBUG for more verbose logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=LOG_LEVEL, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-API_BASE_URL = os.environ.get('OLLAMA_API_BASE_URL', 'http://localhost:11434')
 
 def list_models() -> List[str]:
     response = requests.get(f'{API_BASE_URL}/api/tags')
