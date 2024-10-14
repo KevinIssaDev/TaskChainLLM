@@ -41,6 +41,22 @@ TaskChainLLM is a flexible, modular system that combines Large Language Models (
    python main.py path/to/pattern.md --input "Your input data" --model "model_name" --workers worker1 worker2
    ```
 
+
+### Command-line Arguments
+
+TaskChainLLM supports the following command-line arguments:
+
+- Path(s) to the pattern file(s) *
+- `--input`: Input data for the pattern or path to a file containing input data *
+- `--model`: Model to use for execution (default: "qwen2.5:7b")
+- `--list-models`: List available models
+- `--workers`: Workers to allow (optional)
+- `--list-workers`: List all available workers and their docstrings
+
+*Required unless `--list-models` or `--list-workers` is specified.
+
+
+
 ## Example Time of Day Greeting: Pattern & Worker
 
 ### Pattern
